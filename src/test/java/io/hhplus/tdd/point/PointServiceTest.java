@@ -4,6 +4,7 @@ import io.hhplus.tdd.database.PointHistoryTable;
 import io.hhplus.tdd.database.UserPointTable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -15,12 +16,14 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 public class PointServiceTest {
-
+    
+    @InjectMocks
     private PointService pointService;
 
     @Mock
@@ -29,16 +32,54 @@ public class PointServiceTest {
     @Mock
     private PointHistoryTable pointHistoryTable;
 
+    @Mock
+    private ValidationService validationService;
+
+    @Mock
+    private PointUpdateService pointUpdateService;
+
     @BeforeEach
     public void setUp() {
-        // Mock 객체 초기화
+        // MockitoAnnotations.openMocks(this) 호출을 통해 현재 클래스에 있는 @Mock 애노테이션으로 정의된 목 객체들을 초기화한다.
         MockitoAnnotations.openMocks(this);
-        // PointService 객체 생성, Mock된 UserPointTable과 PointHistoryTable을 주입
-        pointService = new PointService(userPointTable, pointHistoryTable);
+    
+        // ValidationService의 메서드들에 대한 목 행위를 정의한다.
+        // ID 검증 메서드가 호출될 때 아무 동작도 하지 않도록 설정한다.
+        doNothing().when(validationService).validateId(anyLong());
+    
+        // 금액 검증 메서드가 호출될 때 아무 동작도 하지 않도록 설정한다.
+        doNothing().when(validationService).validateAmount(anyLong());
+    
+        // 트랜잭션 타입 검증 메서드가 호출될 때 아무 동작도 하지 않도록 설정한다.
+        doNothing().when(validationService).validateTransactionType(any(TransactionType.class));
+        
+        // PointUpdateService의 calculateNewAmount 메서드에 대한 목 행위를 정의한다.
+        // 메서드가 호출되었을 때 인자로 전달된 현재 금액, 변경할 금액, 트랜잭션 타입을 사용하여 새로운 금액을 계산한다.
+        when(pointUpdateService.calculateNewAmount(anyLong(), anyLong(), any(TransactionType.class)))
+                .thenAnswer(invocation -> {
+                    // 현재 금액을 첫 번째 인자로 받음
+                    long currentAmount = invocation.getArgument(0);
+                    // 변경할 금액을 두 번째 인자로 받음
+                    long amount = invocation.getArgument(1);
+                    // 트랜잭션 타입을 세 번째 인자로 받음
+                    TransactionType type = invocation.getArgument(2);
+                    // 트랜잭션 타입에 따라 새로운 금액을 계산
+                    return type == TransactionType.CHARGE ? currentAmount + amount : currentAmount - amount;
+                });
+        
+        // PointUpdateService의 updateUserPoint 메서드에 대한 목 행위를 정의한다.
+        // 메서드가 호출되었을 때 인자로 전달된 사용자 ID와 새 금액을 사용하여 UserPoint 객체를 반환한다.
+        when(pointUpdateService.updateUserPoint(anyLong(), anyLong()))
+                .thenAnswer(invocation -> UserPoint.of(invocation.getArgument(0), invocation.getArgument(1)));
+        
+        // PointUpdateService의 updatePointHistory 메서드에 대한 목 행위를 정의한다.
+        // 메서드가 호출되었을 때 인자로 전달된 사용자 ID, 금액, 트랜잭션 타입, 현재 시간을 사용하여 PointHistory 객체를 반환한다.
+        when(pointUpdateService.updatePointHistory(anyLong(), anyLong(), any(TransactionType.class)))
+                .thenAnswer(invocation -> PointHistory.of(invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2), System.currentTimeMillis()));
     }
 
     @Test
-    public void chargePoint_NegativeAmount_ThrowsException() {
+    public void testChargePoint_NegativeAmount_ThrowsException() {
         // 음수 금액으로 포인트 충전 시 예외가 발생하는지 테스트
         assertThrows(IllegalArgumentException.class, () -> {
             pointService.updatePointAndHistory(1L, -100L, TransactionType.CHARGE);
@@ -46,7 +87,7 @@ public class PointServiceTest {
     }
 
     @Test
-    public void usePoint_NegativeAmount_ThrowsException() {
+    public void testUsePoint_NegativeAmount_ThrowsException() {
         // 음수 금액으로 포인트 사용 시 예외가 발생하는지 테스트
         assertThrows(IllegalArgumentException.class, () -> {
             pointService.updatePointAndHistory(1L, -100L, TransactionType.USE);
@@ -78,47 +119,60 @@ public class PointServiceTest {
 
     @Test
     public void testUpdatePointAndHistory_Charge() {
-        // 포인트 충전 시 포인트 업데이트와 히스토리 기록 테스트
+        // 포인트 충전 테스트
         long id = 1L;
         long amount = 100L;
         UserPoint userPoint = UserPoint.of(id, 0L);
 
-        // userPointTable의 selectById 메서드가 호출될 때 userPoint를 반환하도록 목킹
         when(userPointTable.selectById(id)).thenReturn(userPoint);
-        // userPointTable의 insertOrUpdate 메서드가 호출될 때 새로운 포인트를 가진 UserPoint 객체를 반환하도록 목킹
-        when(userPointTable.insertOrUpdate(eq(id), anyLong())).thenAnswer(invocation -> UserPoint.of(id, (Long) invocation.getArguments()[1]));
-        // pointHistoryTable의 insert 메서드가 호출될 때 PointHistory 객체를 반환하도록 설정
-        when(pointHistoryTable.insert(eq(id), eq(amount), eq(TransactionType.CHARGE), anyLong()))
-                .thenAnswer(invocation -> PointHistory.of(id, amount, TransactionType.CHARGE, (Long) invocation.getArguments()[3]));
+        when(pointUpdateService.calculateNewAmount(eq(userPoint.point()), eq(amount), eq(TransactionType.CHARGE)))
+                .thenReturn(userPoint.point() + amount);
+        when(pointUpdateService.updateUserPoint(eq(id), eq(userPoint.point() + amount)))
+                .thenReturn(UserPoint.of(id, userPoint.point() + amount));
+        when(pointUpdateService.updatePointHistory(eq(id), eq(amount), eq(TransactionType.CHARGE)))
+                .thenReturn(PointHistory.of(id, amount, TransactionType.CHARGE, System.currentTimeMillis()));
 
-        // 테스트하고자 하는 메서드 호출
         UserPoint result = pointService.updatePointAndHistory(id, amount, TransactionType.CHARGE);
 
-        // 결과 검증
         assertEquals(amount, result.point());
     }
 
     @Test
     public void testUpdatePointAndHistory_Use() {
-        // 포인트 사용 시 포인트 업데이트와 히스토리 기록 테스트
+        // 포인트 사용 테스트
         long id = 1L;
         long amount = 50L;
         UserPoint userPoint = UserPoint.of(id, 100L);
 
-        // userPointTable의 selectById 메서드가 호출될 때 userPoint를 반환하도록 목킹
         when(userPointTable.selectById(id)).thenReturn(userPoint);
+        when(pointUpdateService.calculateNewAmount(eq(userPoint.point()), eq(amount), eq(TransactionType.USE)))
+                .thenReturn(userPoint.point() - amount);
+        when(pointUpdateService.updateUserPoint(eq(id), eq(userPoint.point() - amount)))
+                .thenReturn(UserPoint.of(id, userPoint.point() - amount));
+        when(pointUpdateService.updatePointHistory(eq(id), eq(amount), eq(TransactionType.USE)))
+                .thenReturn(PointHistory.of(id, amount, TransactionType.USE, System.currentTimeMillis()));
 
-        // userPointTable의 insertOrUpdate 메서드가 호출될 때 새로운 포인트를 가진 UserPoint 객체를 반환하도록 목킹
-        when(userPointTable.insertOrUpdate(eq(id), anyLong())).thenAnswer(invocation -> UserPoint.of(id, (Long) invocation.getArguments()[1]));
-
-        // pointHistoryTable의 insert 메서드가 호출될 때 PointHistory 객체를 반환하도록 목킹
-        when(pointHistoryTable.insert(eq(id), eq(amount), eq(TransactionType.USE), anyLong()))
-                .thenAnswer(invocation -> PointHistory.of(id, amount, TransactionType.USE, (Long) invocation.getArguments()[3]));
-
-        // 포인트 사용 후 결과 검증
         UserPoint result = pointService.updatePointAndHistory(id, amount, TransactionType.USE);
 
-        assertEquals(100L - amount, result.point()); // 결과 포인트가 예상한 값과 일치하는지 검증
+        assertEquals(100L - amount, result.point());
+    }
+
+    @Test
+    public void testUpdatePointAndHistory_InvalidId() {
+        // 유효하지 않은 아이디으로 포인트 업데이트 시 예외가 발생하는지 테스트
+        long id = -1L;
+        long amount = 100L;
+
+        assertThrows(IllegalArgumentException.class, () -> pointService.updatePointAndHistory(id, amount, TransactionType.CHARGE));
+    }
+
+    @Test
+    public void testUpdatePointAndHistory_InvalidAmount() {
+        // 유효하지 않은 금액으로 포인트 업데이트 시 예외가 발생하는지 테스트
+        long id = 1L;
+        long amount = -100L;
+
+        assertThrows(IllegalArgumentException.class, () -> pointService.updatePointAndHistory(id, amount, TransactionType.CHARGE));
     }
 
     @Test
@@ -155,9 +209,29 @@ public class PointServiceTest {
         when(pointHistoryTable.insert(eq(id), anyLong(), eq(TransactionType.USE), anyLong()))
                 .thenAnswer(invocation -> PointHistory.of(id, (Long) invocation.getArguments()[1], TransactionType.USE, (Long) invocation.getArguments()[3]));
 
+        // Mock pointUpdateService.calculateNewAmount to avoid side effects
+        when(pointUpdateService.calculateNewAmount(anyLong(), anyLong(), eq(TransactionType.CHARGE)))
+                .thenReturn(initialUserPoint.point() + 100L);
+        when(pointUpdateService.calculateNewAmount(anyLong(), anyLong(), eq(TransactionType.USE)))
+                .thenReturn(initialUserPoint.point() - 10L);
+
         // 충전 작업과 사용 작업을 동시에 실행할 Callable 객체 생성
-        Callable<UserPoint> chargeTask = () -> pointService.updatePointAndHistory(id, 100L, TransactionType.CHARGE);
-        Callable<UserPoint> useTask = () -> pointService.updatePointAndHistory(id, 10L, TransactionType.USE);
+        Callable<UserPoint> chargeTask = () -> {
+            try {
+                return pointService.updatePointAndHistory(id, 100L, TransactionType.CHARGE);
+            } catch (Exception e) {
+                e.printStackTrace();
+                return null;
+            }
+        };
+        Callable<UserPoint> useTask = () -> {
+            try {
+                return pointService.updatePointAndHistory(id, 10L, TransactionType.USE);
+            } catch (Exception e) {
+                e.printStackTrace();
+                return null;
+            }
+        };
 
         // 두 개의 스레드 풀을 사용하여 동시에 실행
         ExecutorService executorService = Executors.newFixedThreadPool(2);
@@ -168,9 +242,15 @@ public class PointServiceTest {
         UserPoint chargeResult = chargeFuture.get();
         UserPoint useResult = useFuture.get();
 
+        // 로그 출력
+        System.out.println("Charge Result: " + (chargeResult != null ? chargeResult.point() : "null"));
+        System.out.println("Use Result: " + (useResult != null ? useResult.point() : "null"));
+
         // 동시성 테스트의 결과를 검증
-        assertTrue(chargeResult.point() >= 0);
-        assertTrue(useResult.point() >= 0);
+        assertNotNull(chargeResult, "Charge result should not be null");
+        assertNotNull(useResult, "Use result should not be null");
+        assertTrue(chargeResult.point() >= 0, "Charge result point should be non-negative");
+        assertTrue(useResult.point() >= 0, "Use result point should be non-negative");
 
         // 스레드 풀 종료
         executorService.shutdown();

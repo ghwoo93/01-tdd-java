@@ -1,66 +1,58 @@
 package io.hhplus.tdd.point;
 
-import org.junit.jupiter.api.Test;
-import org.mockito.MockitoAnnotations;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MockMvc;
-
 import io.hhplus.tdd.database.UserPointTable;
 
 import java.util.Collections;
 
-import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.Test;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
+
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest
+@WebMvcTest(PointController.class)
 @AutoConfigureMockMvc
 public class PointControllerTest {
 
-    // 테스트 대상인 PointController를 직접 생성
-    private PointController pointController;
-
     @Autowired
-    private MockMvc mockMvc; // MockMvc를 사용하여 컨트롤러를 테스트
+    private MockMvc mockMvc;
 
     @MockBean
-    private PointService pointService; // PointService를 Mock으로 생성
+    private PointService pointService;
 
     @Test
-    public void testPoint_NonExistingId() {
+    public void testPoint_NonExistingId() throws Exception {
         // given
-        MockitoAnnotations.openMocks(this);
-        pointController = new PointController(pointService);
         long id = 1L;
         when(pointService.getUserPoint(id)).thenReturn(UserPoint.of(id, 0L));
 
-        // when
-        UserPoint result = pointController.point(id);
-
-        // then
-        assertEquals(0, result.point());
+        // when & then
+        mockMvc.perform(MockMvcRequestBuilders.get("/point/{id}", id))
+                .andExpect(MockMvcResultMatchers.status().isOk())
+                .andExpect(MockMvcResultMatchers.jsonPath("$.point").value(0));
     }
 
     @Test
-    public void testHistory_NonExistingId() {
+    public void testHistory_NonExistingId() throws Exception {
         // given
-        MockitoAnnotations.openMocks(this);
-        pointController = new PointController(pointService);
         long id = 1L;
         when(pointService.findPointHistoriesByUserId(id)).thenReturn(Collections.emptyList());
 
-        // when
-        var result = pointController.history(id);
-
-        // then
-        assertTrue(result.isEmpty());
+        // when & then
+        mockMvc.perform(MockMvcRequestBuilders.get("/point/{id}/histories", id))
+                .andExpect(MockMvcResultMatchers.status().isOk())
+                .andExpect(MockMvcResultMatchers.jsonPath("$").isEmpty());
     }
 
     @Test
@@ -77,9 +69,9 @@ public class PointControllerTest {
         mockMvc.perform(patch("/point/{id}/use", userId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(String.valueOf(invalidAmount)))
-                .andExpect(status().isBadRequest())
+                .andExpect(status().isInternalServerError())
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
-                .andExpect(content().json("{\"code\":\"400\",\"message\":\"Invalid amount\"}"));
+                .andExpect(content().json("{\"code\":\"500\",\"message\":\"Invalid amount\"}"));
     }
 
     @Test
@@ -96,9 +88,9 @@ public class PointControllerTest {
         mockMvc.perform(patch("/point/{id}/charge", userId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(String.valueOf(invalidAmount)))
-                .andExpect(status().isBadRequest())
+                .andExpect(status().isInternalServerError())
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
-                .andExpect(content().json("{\"code\":\"400\",\"message\":\"Invalid amount\"}"));
+                .andExpect(content().json("{\"code\":\"500\",\"message\":\"Invalid amount\"}"));
     }
 
     @Test
@@ -119,12 +111,12 @@ public class PointControllerTest {
                 .thenThrow(new IllegalArgumentException("Insufficient balance"));
 
         
-        // 
+        // when & then
         mockMvc.perform(patch("/point/{id}/use", userId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(String.valueOf(invalidAmount)))
-                .andExpect(status().isBadRequest())
+                .andExpect(status().isInternalServerError())
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
-                .andExpect(content().json("{\"code\":\"400\",\"message\":\"Insufficient balance\"}"));
+                .andExpect(content().json("{\"code\":\"500\",\"message\":\"Insufficient balance\"}"));
     }
 }

@@ -3,10 +3,7 @@ package io.hhplus.tdd.point;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
-
-import io.hhplus.tdd.ErrorResponse;
 
 import java.util.List;
 
@@ -39,8 +36,6 @@ public class PointController {
     public List<PointHistory> history(
             @PathVariable("id") long id
     ) {
-        //return List.of();
-        //log.info("findPointHistoriesByUserId: {}", id);
         return pointService.findPointHistoriesByUserId(id);
     }
 
@@ -52,7 +47,6 @@ public class PointController {
             @PathVariable("id") long id,
             @RequestBody long amount
     ) {
-        //return new UserPoint(0, 0, 0);
         return pointService.updatePointAndHistory(id, amount, TransactionType.CHARGE);
     }
 
@@ -64,14 +58,7 @@ public class PointController {
             @PathVariable("id") long id,
             @RequestBody long amount
     ) {
-        //return new UserPoint(0, 0, 0);
         return pointService.updatePointAndHistory(id, amount, TransactionType.USE);
     }
 
-    @ExceptionHandler(IllegalArgumentException.class)
-    @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public ErrorResponse handleIllegalArgumentException(IllegalArgumentException ex) {
-        log.error("IllegalArgumentException: {}", ex.getMessage());
-        return new ErrorResponse("400", ex.getMessage());
-    }
 }
